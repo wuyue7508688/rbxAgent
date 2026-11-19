@@ -48,6 +48,7 @@ work/
 iTunes/
 
 # generated / local-only
+/.env.deepseek.local
 test-mp3s/
 design/sketch/dist/
 fixtures/build/
