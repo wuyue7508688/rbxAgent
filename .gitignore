@@ -49,6 +49,7 @@ iTunes/
 
 # generated / local-only
 /.env.deepseek.local
+/agent/dsh/.bundle/
 test-mp3s/
 design/sketch/dist/
 fixtures/build/
