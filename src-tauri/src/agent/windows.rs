@@ -336,6 +336,7 @@ impl Runtime {
                     .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../agent/dsh"))
             })
             .ok_or("The bundled library Agent runtime is missing.")?;
+        let assets = dunce::simplified(&assets);
         let bundled_node = std::env::current_exe()
             .ok()
             .map(|path| path.with_file_name("rbxport-agent-node.exe"));

@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.10.2",
+    "date": "2026-11-20",
+    "changes": [
+      "(Fixed) Start the Library Agent correctly when checking the connection or sending a message in an installed Windows build."
+    ]
+  },
+  {
     "version": "1.10.1",
     "date": "2026-11-20",
     "changes": [
