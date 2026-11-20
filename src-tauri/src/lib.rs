@@ -18,6 +18,7 @@ pub mod analysis;
 mod analysis_extensions;
 mod analysis_pipeline;
 pub mod commands;
+mod agent;
 mod usb_import;
 pub mod cues;
 pub mod details;
@@ -411,6 +412,7 @@ pub fn run() {
     }
 
     let result = tauri::Builder::default()
+        .manage(agent::Agent::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -530,6 +532,16 @@ pub fn run() {
             });
         })
         .invoke_handler(tauri::generate_handler![
+            agent::agent_configure,
+            agent::agent_has_key,
+            agent::agent_run,
+            agent::agent_test,
+            agent::agent_stop,
+            agent::agent_delete_session,
+            agent::agent_tool_result,
+            agent::library::search_library_tracks,
+            agent::library::create_playlist_with_id,
+            agent::library::add_matching_tracks_to_playlist,
             browse_settings::rekordbox_browse_settings,
             startup::startup_milestone,
             startup::show_window,
@@ -768,6 +780,7 @@ pub fn run() {
                 // An update downloaded this run and waiting for the quit
                 // (Windows) is installed now, silently.
                 if matches!(event, tauri::RunEvent::Exit) {
+                    agent::stop_on_exit(handle);
                     crate::screen_cache::save(handle);
                     crate::update::on_exit(handle);
                 }

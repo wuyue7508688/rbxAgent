@@ -24,6 +24,7 @@ import { useCommands } from "@/store/useCommands";
 import type { TrackSearchField } from "@/lib/search";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 import { droppedFilePaths, getBackend, subscribeNativeFileDrops } from "@/ipc/client";
 import type {
   Backend, DeckId, DeckTick, Device, ImportReport, LibraryProblem, LibrarySummary, RowDto, SortColumn, TrackField, TreeNode, ViewSpec,
@@ -34,6 +35,9 @@ import { clearWaveformPreviewCache } from "@/views/browser/WaveformPreview";
 import { TreeView } from "@/views/tree/TreeView";
 import { ConnectedTopBar } from "@/views/topbar/TopBar";
 import { StatusBar } from "@/views/statusbar/StatusBar";
+import { AgentPanel } from "@/views/agent/AgentPanel";
+import { inAgentDesktop, inAgentPreview } from "@/views/agent/desktop";
+import type { AgentToolUi, AgentUiContext } from "@/views/agent/tools";
 import { LinkDeckStrip } from "@/views/statusbar/LinkDeckStrip";
 import styles from "./App.module.css";
 import { locateLoadedTrack } from "@/lib/locateLoaded";
@@ -261,6 +265,7 @@ function AppBody() {
   }, []);
   // The rows behind the selection, so they can be queued for analysis.
   const [selectedTracks, setSelectedTracks] = useState<{ id: string; title: string }[]>([]);
+  const agentSelection = useRef<{ pane: "main" | "sub"; tracks: { id: string; title: string }[] }>({ pane: "main", tracks: [] });
   // The row the player is showing. Set by the browser as the selection moves,
   // so the player reflects what is highlighted rather than nothing. It starts
   // empty on every run: a track restored from the last session would be loaded
@@ -2269,10 +2274,12 @@ function AppBody() {
   });
   const analyseSelection = useEventCallback(() => analyseTracks(selectedTracks));
   const reportMainSelection = useCallback((tracks: { id: string; title: string }[]) => {
+    agentSelection.current = { pane: "main", tracks };
     setSelectedTracks(tracks);
     setInfoSelection(tracks.map((t) => t.id));
   }, []);
   const reportSubSelection = useCallback((tracks: { id: string; title: string }[]) => {
+    agentSelection.current = { pane: "sub", tracks };
     setInfoSelection(tracks.map((t) => t.id));
   }, []);
   /** Configure one track: the deck's own, from its menu. */
@@ -3248,6 +3255,40 @@ function AppBody() {
   useEffect(() => {
     if (loggedActivity) void getBackend().then(backend => backend.logStatusMessage(false, loggedActivity)).catch(() => {});
   }, [loggedActivity]);
+  const agentUiContext = useEventCallback((): AgentUiContext => {
+    const external = spec.source.kind === "folder" || spec.source.kind === "device" || selectedNode?.kind === "device";
+    const name = selectedNode?.name ?? "Collection";
+    const selection = agentSelection.current.pane === "sub" && !subOpen ? { pane: "main" as const, tracks: selectedTracks } : agentSelection.current;
+    return {
+      source: {
+        kind: selectedNode?.kind ?? "collection",
+        name: external ? name.split(/[\\/]/).filter(Boolean).at(-1) ?? "" : name,
+        playlistId: spec.source.kind === "playlist" ? spec.source.id : null,
+      },
+      query,
+      searchField,
+      filters: spec.filter ?? null,
+      selection: {
+        pane: selection.tracks.length ? selection.pane : null,
+        tracks: selection.tracks.map(({ id, title }) => selection.pane === "main" && external || !/^\d+$/.test(id)
+          ? { title }
+          : { id, title }),
+      },
+    };
+  });
+  const agentOpenPlaylist = useEventCallback<Parameters<AgentToolUi["openPlaylist"]>, ReturnType<AgentToolUi["openPlaylist"]>>(async (id) => {
+    let nodes = tree;
+    if (!nodes.some((node) => node.id === id)) nodes = withSources(await (await getBackend()).playlistTree());
+    const node = nodes.find((item) => item.id === id);
+    if (!node || (node.kind !== "playlist" && node.kind !== "smartPlaylist")) throw new Error("Playlist not found.");
+    flushSync(() => {
+      if (nodes !== tree) setTree(nodes);
+      setSelectedNode(node);
+    });
+    if (agentUiContext().source.playlistId !== id) throw new Error("Could not open the playlist.");
+    return { id: node.id, name: node.name, kind: node.kind };
+  });
+  const agentUi = useMemo(() => ({ getUiContext: agentUiContext, openPlaylist: agentOpenPlaylist }), [agentUiContext, agentOpenPlaylist]);
   return (
     <PreferencesProvider value={prefs}>
     <MasterOutputConnection mode={viewPrefs.vuMeter} />
@@ -3778,6 +3819,7 @@ function AppBody() {
         }}
       />
     </div>
+    {(inAgentPreview || (inAgentDesktop && !platform.mac && !platform.linux)) && <AgentPanel ui={agentUi} />}
     </PreferencesProvider>
   );
 }

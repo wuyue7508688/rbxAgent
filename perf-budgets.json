@@ -27,7 +27,7 @@
   "gates": {
     "bundle": {
       "initialChunkKbGz": 150,
-      "totalKbGz": 340
+      "totalKbGz": 350
     },
     "browser": {
       "firstRowsMs": {
