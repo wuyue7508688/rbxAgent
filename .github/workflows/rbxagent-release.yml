@@ -1,0 +1,196 @@
+name: Release rbxAgent for Windows
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rbxagent-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'wuyue7508688/rbxAgent'
+    runs-on: windows-2025
+    timeout-minutes: 75
+    env:
+      CARGO_TARGET_DIR: C:/rbl-target
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          architecture: x64
+          cache: pnpm
+
+      - name: Verify release source
+        id: source
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $version = node -p 'require("./package.json").version'
+          if ($version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw "Expected a stable SemVer in package.json."
+          }
+          $tag = "v$version"
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -cne "refs/tags/$tag") {
+            throw "The release tag must match package.json ($tag)."
+          }
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $env:GITHUB_REF -cne 'refs/heads/dev') {
+            throw "Run this workflow from dev."
+          }
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/dev:refs/remotes/origin/dev
+          $commit = git rev-parse HEAD
+          git merge-base --is-ancestor $commit origin/dev
+          git merge-base --is-ancestor origin/main $commit
+          node scripts/sync-version.mjs --version $version
+          git diff --exit-code -- package.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
+          node scripts/release-notes.mjs validate release-notes.json $version
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+          targets: x86_64-pc-windows-msvc
+      - name: Set OpenSSL build Perl
+        shell: pwsh
+        run: |
+          $perl = (Get-Command perl.exe -ErrorAction Stop).Source
+          "OPENSSL_SRC_PERL=$perl" >> $env:GITHUB_ENV
+
+      - name: Check frontend and Agent
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm exec vitest run src/views/agent/tools.test.ts src/views/settings/AboutPane.test.tsx src/store/useUpdater.test.tsx
+          npm ci --prefix agent/dsh --omit=dev --no-audit --no-fund
+          node --test agent/dsh/library-tools.test.ts
+          node agent/dsh/prepare-sidecar.mjs
+
+      - name: Build signed NSIS installer
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "Tauri updater signing key is missing." }
+          pnpm exec tauri build --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.agent.conf.json
+
+      - name: Verify and stage release assets
+        shell: pwsh
+        run: |
+          $bundle = "$env:CARGO_TARGET_DIR/x86_64-pc-windows-msvc/release/bundle/nsis"
+          $installers = @(Get-ChildItem -LiteralPath $bundle -File -Filter '*-setup.exe')
+          $signatures = @(Get-ChildItem -LiteralPath $bundle -File -Filter '*-setup.exe.sig')
+          if ($installers.Count -ne 1 -or $signatures.Count -ne 1 -or
+              $signatures[0].Name -ne "$($installers[0].Name).sig" -or
+              $installers[0].Length -eq 0 -or $signatures[0].Length -eq 0) {
+            throw "Expected one NSIS installer and its updater signature."
+          }
+          $env:RELEASE_INSTALLER = "rbxAgent-$env:RELEASE_VERSION-windows-x64-setup.exe"
+          New-Item -ItemType Directory -Path out | Out-Null
+          Copy-Item -LiteralPath $installers[0].FullName -Destination "out/$env:RELEASE_INSTALLER"
+          Copy-Item -LiteralPath $signatures[0].FullName -Destination "out/$env:RELEASE_INSTALLER.sig"
+          @'
+          import { readFileSync, writeFileSync } from "node:fs";
+          import { readReleaseNotes, releaseForVersion, updaterMarkdown } from "./scripts/release-notes.mjs";
+          const { GITHUB_REPOSITORY, GITHUB_SERVER_URL, RELEASE_VERSION, RELEASE_TAG, RELEASE_INSTALLER } = process.env;
+          const notes = readReleaseNotes("release-notes.json");
+          const release = releaseForVersion(notes, RELEASE_VERSION);
+          const signature = readFileSync("out/" + RELEASE_INSTALLER + ".sig", "utf8").trim();
+          const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
+          const keyBytes = encoded => Buffer.from(Buffer.from(encoded, "base64").toString("utf8").split(/\r?\n/)[1], "base64");
+          const publicKey = keyBytes(config.plugins.updater.pubkey);
+          const signed = keyBytes(signature);
+          if (publicKey.length !== 42 || signed.length !== 74 || !publicKey.subarray(2, 10).equals(signed.subarray(2, 10))) {
+            throw new Error("Installer signature does not match the embedded updater key.");
+          }
+          const manifest = {
+            version: RELEASE_VERSION,
+            notes: updaterMarkdown(notes),
+            pub_date: new Date().toISOString(),
+            platforms: {
+              "windows-x86_64": {
+                signature,
+                url: GITHUB_SERVER_URL + "/" + GITHUB_REPOSITORY + "/releases/download/" + RELEASE_TAG + "/" + RELEASE_INSTALLER,
+              },
+            },
+          };
+          writeFileSync("out/latest.json", JSON.stringify(manifest, null, 2) + "\n");
+          writeFileSync("out/release-notes.md", updaterMarkdown([release]) + "\n");
+          '@ | node --input-type=module -
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rbxagent-windows-x64
+          path: out/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: rbxagent-windows-x64
+          path: out
+      - name: Publish Windows release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main refs/heads/dev:refs/remotes/origin/dev
+          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/dev
+          git merge-base --is-ancestor origin/main "$RELEASE_COMMIT"
+          tag_ref="refs/tags/$RELEASE_TAG"
+          remote_tag="$(git ls-remote origin "$tag_ref" "$tag_ref^{}")"
+          if [ -z "$remote_tag" ]; then
+            git push origin "$RELEASE_COMMIT:$tag_ref"
+          else
+            tagged_commit="$(awk 'END { print $1 }' <<< "$remote_tag")"
+            if [ "$tagged_commit" != "$RELEASE_COMMIT" ]; then
+              echo "::error::$RELEASE_TAG already points to another commit."
+              exit 1
+            fi
+          fi
+
+          if draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"; then
+            if [ "$draft" = false ]; then
+              echo "$RELEASE_TAG is already published."
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "rbxAgent $RELEASE_TAG" --notes-file out/release-notes.md
+          fi
+          installer="out/rbxAgent-${RELEASE_TAG#v}-windows-x64-setup.exe"
+          gh release upload "$RELEASE_TAG" "$installer" "$installer.sig" out/latest.json --clobber
+          git push origin "$RELEASE_COMMIT:refs/heads/main"
+          gh release edit "$RELEASE_TAG" --draft=false --latest --verify-tag

@@ -187,6 +187,13 @@ rbxport 第一次测试连接或发消息时启动 dsh，收到 SDK 就绪消息
 
 [现有安装包工作流](.github/workflows/build-installer.yml) · [现有 Windows 安装包产物配置](.github/actions/package-installer/action.yml)
 
+#### rbxAgent 发版与升级
+
+1. 在 `dev` 上用 `node scripts/sync-version.mjs --version X.Y.Z` 递增应用版本，更新 `release-notes.json`，提交并推送。
+2. 在 GitHub Actions 中运行 [rbxAgent Windows 发布流水线](.github/workflows/rbxagent-release.yml)，选择 `dev`。首次可从同一提交推送 `vX.Y.Z` 标签触发。流水线在 GitHub 托管的 Windows x64 Runner 上检查并构建带 dsh 的签名安装包。
+3. 构建通过后，流水线将 `main` 快进到构建提交，在 [rbxAgent Releases](https://github.com/wuyue7508688/rbxAgent/releases) 发布 `setup.exe`、`.sig` 与 `latest.json`。签名私钥及密码由 GitHub Actions Secrets 提供，客户端使用项目配置中的公钥验签。
+4. 已安装上游版或本地预览版的用户手动覆盖安装一次。使用 rbxAgent 渠道后，应用启动时检查新版本，后台下载并在应用退出时安装。
+
 ### 模块隔离与上游同步
 
 | 拟新增位置 | 放什么 |

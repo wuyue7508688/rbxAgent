@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.10.1",
+    "date": "2026-11-20",
+    "changes": [
+      "(New) Open the Library Agent beside the rbxport library and resume saved conversations after restarting.",
+      "(New) Ask the Agent to find tracks, open or create playlists, add matches, and edit track fields using the existing Undo history.",
+      "(New) Connect through DeepSeek or OpenAI Responses with API keys stored in Windows Credential Manager.",
+      "(New) Receive rbxAgent Windows x64 updates through the app after installing this release."
+    ]
+  },
+  {
     "version": "1.10.0",
     "date": "2026-11-07",
     "changes": [
