@@ -62,6 +62,14 @@ runs:
       shell: bash
       run: node scripts/appimage-gtk-hook.mjs install
 
+    - name: Prepare Windows library Agent
+      if: inputs.target == 'x86_64-pc-windows-msvc' && contains(inputs.bundles, 'nsis')
+      shell: pwsh
+      run: |
+        npm ci --prefix agent/dsh --omit=dev --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        node agent/dsh/prepare-sidecar.mjs
+
     - name: Build
       uses: tauri-apps/tauri-action@v0
       env:
@@ -79,7 +87,7 @@ runs:
         AZURE_CORE_ENCRYPT_TOKEN_CACHE: "false"
         APPIMAGE_EXTRACT_AND_RUN: "1"
       with:
-        args: --target ${{ inputs.target }} --bundles ${{ inputs.bundles }} --verbose
+        args: --target ${{ inputs.target }} --bundles ${{ inputs.bundles }} --verbose ${{ inputs.target == 'x86_64-pc-windows-msvc' && contains(inputs.bundles, 'nsis') && '--config src-tauri/tauri.agent.conf.json' || '' }}
 
     - name: Verify Mac architecture
       if: runner.os == 'macOS'

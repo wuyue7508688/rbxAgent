@@ -1,6 +1,6 @@
 # rbxport 曲库 Agent 产品开发方案
 
-状态：产品需求已确认，待批准开发
+状态：首版已实现并生成 Windows x64 安装包
 
 ## 1. 产品目标
 
@@ -180,7 +180,7 @@ rbxport 第一次测试连接或发消息时启动 dsh，收到 SDK 就绪消息
 | 场景 | 顺序 |
 | --- | --- |
 | 开发调试 | 安装 rbxport 的依赖；运行拟新增的 dsh 准备脚本，从独立锁文件安装 dsh 并准备本机运行时资源；执行现有 `pnpm dev`，在 Tauri 窗口配置模型后测试 Agent。使用临时曲库时在 PowerShell 先设置 `$env:RB_LITE_TEST = '1'`。 |
-| 生成安装包 | 在现有 installer workflow 的 Tauri 打包步骤前运行准备脚本，按目标架构生成 Node sidecar，并将 dsh、专用 profile、工具插件及分发声明放进应用资源目录。沿用现有 Tauri NSIS 打包生成 `rbxport-…-setup.exe`。本地无更新签名密钥时，使用本地打包配置关闭 updater artifact 生成。 |
+| 生成安装包 | 在现有 installer workflow 的 Tauri 打包步骤前运行准备脚本，按目标架构生成 Node sidecar。NSIS 通过 Agent 安装钩子把 dsh、专用 profile、工具插件和授权文件作为一个目录打包。沿用现有 Tauri NSIS 流程生成 `rbxport-…-setup.exe`。本地无更新签名密钥时，使用本地打包配置关闭 updater artifact 生成。 |
 | 用户安装和启动 | 运行一个 `setup.exe`，从开始菜单启动 rbxport，打开「曲库 Agent」并填入 API Key。首次测试连接或发送消息时，Tauri 从安装目录解析运行时和资源路径，在后台启动 dsh SDK profile。收到就绪消息后开始会话。退出应用时关闭 dsh。 |
 
 安装包验收在没有 Node.js、npm 或 dsh 的干净 Windows x64 环境进行。测试安装目录含空格、首次启动、重启续聊、DeepSeek 工具回调和批量添加。浏览器预览用于悬浮窗与模拟工具测试，原生 dsh 进程由桌面版验证。
@@ -231,6 +231,10 @@ rbxport 第一次测试连接或发消息时启动 dsh，收到 SDK 就绪消息
 | 项目回归 | 类型检查、前端 lint、已有相关测试和新增端到端场景通过。 | TypeScript、ESLint、Vitest、Playwright、Cargo |
 
 浏览器模拟曲库用于界面和工具联调。原生传输、存储生命周期和实际编辑另用桌面应用加临时曲库验证。Windows 桌面验收环境需准备 Rust、MSVC、Windows SDK、WebView2 和 Perl。
+
+本次执行按用户要求省去端到端测试，保留代码检查、单元测试和安装包构建。
+
+前端包体在 Windows x64、Node.js 24.19.0 上用生产 Vite 构建及项目的 `check-bundle-size.ts` 脚本测量。接入前为 338.2 KB gzip，加入 Agent 后为 346.1 KB gzip。总代码上限调整至 350 KB，首块上限保持 150 KB。
 
 ## 7. 参考
 

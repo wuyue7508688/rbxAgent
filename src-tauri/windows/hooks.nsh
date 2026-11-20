@@ -1,4 +1,7 @@
 !macro NSIS_HOOK_POSTINSTALL
+  !ifmacrodef RBXPORT_AGENT_INSTALL
+    !insertmacro RBXPORT_AGENT_INSTALL
+  !endif
   ; Keep the elevated entry point under Program Files. The scheduled task
   ; never executes an updater binary from a user-writable directory.
   CopyFiles /SILENT "$INSTDIR\rbxport.exe" "$INSTDIR\rbxport-updater.exe"
@@ -15,6 +18,9 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  !ifmacrodef RBXPORT_AGENT_UNINSTALL
+    !insertmacro RBXPORT_AGENT_UNINSTALL
+  !endif
   ; Remove the privileged entry point before the ordinary uninstaller removes
   ; the files it knows about. The helper copy itself is generated at install
   ; time, so it is not in Tauri's resource manifest.

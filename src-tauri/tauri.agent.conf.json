@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "externalBin": ["../agent/dsh/.bundle/rbxport-agent-node"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/agent-hooks.nsh"
+      }
+    }
+  }
+}
